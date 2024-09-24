@@ -1,0 +1,7 @@
+\openwrt
+\output
+generic
+targets
+packages
+.config
+.DS_Store

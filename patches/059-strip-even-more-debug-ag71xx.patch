@@ -1,0 +1,88 @@
+--- a/target/linux/ath79/files/drivers/net/ethernet/atheros/ag71xx/ag71xx_main.c
++++ b/target/linux/ath79/files/drivers/net/ethernet/atheros/ag71xx/ag71xx_main.c
+@@ -56,7 +56,7 @@
+ 		ag71xx_rr(ag, AG71XX_REG_RX_STATUS));
+ }
+ 
+-static void ag71xx_dump_regs(struct ag71xx *ag)
++/*static void ag71xx_dump_regs(struct ag71xx *ag)
+ {
+ 	DBG("%s: mac_cfg1=%08x, mac_cfg2=%08x, ipg=%08x, hdx=%08x, mfl=%08x\n",
+ 		ag->dev->name,
+@@ -80,7 +80,7 @@
+ 		ag71xx_rr(ag, AG71XX_REG_FIFO_CFG3),
+ 		ag71xx_rr(ag, AG71XX_REG_FIFO_CFG4),
+ 		ag71xx_rr(ag, AG71XX_REG_FIFO_CFG5));
+-}
++}*/
+ 
+ static inline void ag71xx_dump_intr(struct ag71xx *ag, char *label, u32 intr)
+ {
+@@ -199,18 +199,17 @@
+ 	int ring_size = BIT(ring->order);
+ 	int ring_mask = BIT(ring->order) - 1;
+ 	unsigned int i;
+-	int ret;
++	int ret = 0;
+ 
+-	ret = 0;
+ 	for (i = 0; i < ring_size; i++) {
+ 		struct ag71xx_desc *desc = ag71xx_ring_desc(ring, i);
+ 
+ 		desc->next = (u32) (ring->descs_dma +
+ 			AG71XX_DESC_SIZE * ((i + 1) & ring_mask));
+ 
+-		DBG("ag71xx: RX desc at %p, next is %08x\n",
++/*		DBG("ag71xx: RX desc at %p, next is %08x\n",
+ 			desc, desc->next);
+-	}
++*/	}
+ 
+ 	for (i = 0; i < ring_size; i++) {
+ 		struct ag71xx_desc *desc = ag71xx_ring_desc(ring, i);
+@@ -237,10 +236,9 @@
+ {
+ 	struct ag71xx_ring *ring = &ag->rx_ring;
+ 	int ring_mask = BIT(ring->order) - 1;
+-	unsigned int count;
++	unsigned int count = 0;
+ 	int offset = ag->rx_buf_offset;
+ 
+-	count = 0;
+ 	for (; ring->curr - ring->dirty > 0; ring->dirty++) {
+ 		struct ag71xx_desc *desc;
+ 		unsigned int i;
+@@ -260,7 +258,7 @@
+ 	/* flush descriptors */
+ 	wmb();
+ 
+-	DBG("%s: %u rx descriptors refilled\n", ag->dev->name, count);
++//	DBG("%s: %u rx descriptors refilled\n", ag->dev->name, count);
+ 
+ 	return count;
+ }
+@@ -737,7 +735,7 @@
+ 			ag71xx_speed_str(ag),
+ 			(DUPLEX_FULL == ag->duplex) ? "Full" : "Half");
+ 
+-	ag71xx_dump_regs(ag);
++//	ag71xx_dump_regs(ag);
+ }
+ 
+ void ag71xx_link_adjust(struct ag71xx *ag)
+@@ -1497,13 +1495,13 @@
+ 
+ 	netif_napi_add(dev, &ag->napi, ag71xx_poll, AG71XX_NAPI_WEIGHT);
+ 
+-	ag71xx_dump_regs(ag);
++//	ag71xx_dump_regs(ag);
+ 
+ 	ag71xx_wr(ag, AG71XX_REG_MAC_CFG1, 0);
+ 
+ 	ag71xx_hw_init(ag);
+ 
+-	ag71xx_dump_regs(ag);
++//	ag71xx_dump_regs(ag);
+ 
+ 	/*
+ 	 * populate current node to register mdio-bus as a subdevice.

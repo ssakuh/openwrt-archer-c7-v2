@@ -1,0 +1,38 @@
+--- a/package/libs/openssl/Config.in
++++ b/package/libs/openssl/Config.in
+@@ -2,6 +2,12 @@
+ 
+ comment "Build Options"
+ 
++config OPENSSL_THREADS
++	bool
++	default y
++	prompt "Threading support"
++	select PACKAGE_libpthread
++
+ config OPENSSL_OPTIMIZE_SPEED
+ 	bool
+ 	default y if x86_64 || i386
+--- a/package/libs/openssl/Makefile
++++ b/package/libs/openssl/Makefile
+@@ -39,6 +39,7 @@
+ 	CONFIG_OPENSSL_NO_DEPRECATED \
+ 	CONFIG_OPENSSL_OPTIMIZE_SPEED \
+ 	CONFIG_OPENSSL_PREFER_CHACHA_OVER_GCM \
++	CONFIG_OPENSSL_THREADS \
+ 	CONFIG_OPENSSL_WITH_ARIA \
+ 	CONFIG_OPENSSL_WITH_ASM \
+ 	CONFIG_OPENSSL_WITH_ASYNC \
+@@ -259,6 +260,12 @@
+   OPENSSL_OPTIONS += no-deprecated
+ endif
+ 
++ifdef CONFIG_OPENSSL_THREADS
++  OPENSSL_OPTIONS += threads
++else
++  OPENSSL_OPTIONS += no-threads
++endif
++
+ ifeq ($(CONFIG_OPENSSL_OPTIMIZE_SPEED),y)
+   TARGET_CFLAGS := $(filter-out -O%,$(TARGET_CFLAGS)) -O3
+ else
