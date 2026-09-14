@@ -1,10 +1,12 @@
 --- a/package/network/config/firewall/files/firewall.config
 +++ b/package/network/config/firewall/files/firewall.config
-@@ -3,6 +3,7 @@
- 	option input		ACCEPT
+@@ -3,4 +3,9 @@
  	option output		ACCEPT
  	option forward		REJECT
++	option drop_invalid	1
 +	option flow_offloading	1
++# NOTE: flow offloading bypasses SQM/CAKE. If you enable SQM
++# (sqm-scripts) for bufferbloat, set flow_offloading to 0 and
++# reboot, otherwise shaping will have no effect.
  # Uncomment this line to disable ipv6 rules
  #	option disable_ipv6	1
- 

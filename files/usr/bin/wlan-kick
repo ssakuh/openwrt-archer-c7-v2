@@ -1,22 +1,51 @@
 #!/bin/sh
+# wlan-kick: list/find/deauth Wi-Fi clients. Hardened against ubus injection.
+set -eu
 
-if [ "$1" = "list" ]; then
-    iwinfo wlan0 assoclist | grep ago && iwinfo wlan1 assoclist | grep ago
-elif [ "$1" = "find" ]; then
-	if [ -n "$2" ]; then
-		cat /etc/config/dhcp | grep -i -A 2 -B 2 "$2" | egrep -i "name|mac"
-	else
-		echo "wlan-kick: find: error: search for hostname or MAC address"
-		exit 1
+is_valid_mac() {
+	case "${1:-}" in
+		[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+# Discover hostapd objects (wlan0/wlan1 names are not stable).
+hostapd_instances() {
+	if command -v ubus >/dev/null 2>&1; then
+		ubus list 'hostapd.*' 2>/dev/null | grep '^hostapd\.' || true
 	fi
-elif [ -n "$1" ]; then
-	if [ ${#1} -eq 17 ]; then
-		ubus call hostapd.wlan0 del_client '{"addr":"'$1'", "reason":1, "deauth":true, "ban_time":1000}'
-		ubus call hostapd.wlan1 del_client '{"addr":"'$1'", "reason":1, "deauth":true, "ban_time":1000}'
-	else
-		echo "wlan-kick: error: invalid MAC address"
-		exit 1
-	fi
-else
-	echo "Usage: wlan-kick [MAC|list|find]"
-fi
+}
+
+cmd="${1:-}"
+case "$cmd" in
+	list)
+		if command -v iwinfo >/dev/null 2>&1; then
+			for ifname in $(iw dev 2>/dev/null | awk '$1=="Interface"{print $2}'); do
+				iwinfo "$ifname" assoclist 2>/dev/null | grep ' ago' || true
+			done
+		else
+			echo "wlan-kick: error: iwinfo not found" >&2; exit 1
+		fi
+		;;
+	find)
+		pattern="${2:-}"
+		[ -n "$pattern" ] || { echo "wlan-kick: find: error: search for hostname or MAC address" >&2; exit 1; }
+		grep -i -A 2 -B 2 -e "$pattern" /etc/config/dhcp | grep -E -i "name|mac" || true
+		;;
+	'')
+		echo "Usage: wlan-kick [MAC|list|find]" >&2; exit 1
+		;;
+	*)
+		if ! is_valid_mac "$cmd"; then
+			echo "wlan-kick: error: invalid MAC address" >&2; exit 1
+		fi
+		# MAC charset is now strictly hex+colon, safe to interpolate into JSON.
+		instances="$(hostapd_instances)"
+		[ -n "$instances" ] || instances="hostapd.wlan0
+hostapd.wlan1"
+		# shellcheck disable=SC2086
+		for inst in $instances; do
+			ubus call "$inst" del_client "{\"addr\":\"$cmd\", \"reason\":1, \"deauth\":true, \"ban_time\":1000}" || true
+		done
+		;;
+esac

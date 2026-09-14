@@ -14,30 +14,39 @@ Recommended to make a config backup and use `-n` with sysupgrade to not keep set
 
 ## Usage
 
-Tested sucessfully only under `amd64` architecture.
+Tested on `linux/amd64` (Docker) – builds **only** `tplink_archer-c7-v2` (ath79/generic, sysupgrade ~8.5 MB, factory 16 MB padded, fits 16 MB flash).
 
 ```shell
-docker build --output=. .
+# Build and export to ./bin/targets/ath79/generic/
+docker build --output=bin --build-arg VERSION=25.12.5 .
+
+ls -lh bin/targets/ath79/generic/*archer-c7-v2*
+# → openwrt-ath79-generic-tplink_archer-c7-v2-squashfs-factory.bin (16M padded)
+# → openwrt-ath79-generic-tplink_archer-c7-v2-squashfs-factory-eu.bin
+# → openwrt-ath79-generic-tplink_archer-c7-v2-squashfs-factory-us.bin
+# → openwrt-ath79-generic-tplink_archer-c7-v2-squashfs-sysupgrade.bin (~8.5M)
+# → sha256sums
 ```
 
-Rename the built binary to a short name, i.e. `firmware.bin` and upgrade the system via TP-Link Web UI.
+Rename the factory image to `factory.bin` and flash via TP-Link Web UI, or `sysupgrade -n /tmp/*sysupgrade.bin` via SSH.
 
 ## Performance tuning
 
 When the device is configured to NAT via PPPoE:
 
-- Gigabit speeds can be achieved with the following configuration:
+- Gigabit speeds can be achieved with the following configuration (baked in by default):
 ```shell
 $ cat /etc/config/firewall
 config defaults
-	option input 'REJECT'
+	option input 'ACCEPT'
 	option output 'ACCEPT'
 	option forward 'REJECT'
 	option synflood_protect '1'
 	option drop_invalid '1'
 	option flow_offloading '1'
-	option flow_offloading_hw '1'
 ```
+NOTE: ath79/QCA9558 has no HW offload — do not set `flow_offloading_hw`.
+NOTE: flow offload bypasses SQM/CAKE. If you enable SQM, set `flow_offloading` to `0`.
 
 - Wireguard interfaces must be configured with a matching MTU:
 ```shell
@@ -53,9 +62,8 @@ config interface 'WireGuard'
 ```
 This way, it can achieve around 50Mbps/35Mbps throughput.
 
-Regardless of the WPA Daemon tested, `psk2` is the strongest encryption type that this device can handle. Maximum wireless performance has been achieved with the following configuration:
+Regardless of the WPA Daemon tested, `psk2` is the strongest encryption type that this device can handle. Image ships `wpad-basic-mbedtls` (use as-is; `wpad-mini` below is only for a smaller footprint). Maximum wireless performance has been achieved with the following configuration:
 ```shell
-$ opkg install wpad-mini
 $ cat /etc/config/wireless
 config wifi-device 'radio0'
 	option type 'mac80211'
@@ -102,6 +110,13 @@ config wifi-iface 'default_radio1'
 $ crontab -l
 0 3 * * * wifi down && wifi up
 ```
+
+Measured with `iperf3` against the router (5 GHz, 2x2 client): stock
+`kmod-ath10k` + `ath10k-firmware-qca988x` sends faster than `-ct`
+(up 258 → 299 Mbps single-stream, 304 → 357 Mbps with 4 streams;
+down ~200 Mbps with both, the single core runs at 100% on transmit).
+DFS channel 52, VHT40 and txpower 27 were tested and measured worse,
+so channel 36 / VHT80 / txpower 23 is kept.
 
 ## Known issues
 

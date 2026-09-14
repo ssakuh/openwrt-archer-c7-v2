@@ -1,6 +1,0 @@
-#!/bin/sh
-
-/etc/init.d/nfsd disable
-/etc/init.d/nfsd stop
-
-exit 0
