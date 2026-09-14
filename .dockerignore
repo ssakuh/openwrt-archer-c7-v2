@@ -1,0 +1,11 @@
+.git
+.gitignore
+.github
+bin
+build_dir
+dl
+staging_dir
+tmp
+*.log
+.DS_Store
+__pycache__

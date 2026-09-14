@@ -1,0 +1,65 @@
+name: Build
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'OpenWrt version'
+        required: false
+        default: ''
+permissions:
+  contents: write
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: |
+          set -eEo pipefail
+          V="${{ inputs.version }}"
+          if [ -z "$V" ]; then
+            TAGS=$(git ls-remote --tags https://github.com/openwrt/openwrt.git | grep -E 'refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' | cut -d/ -f3 | sed 's/^v//' | sort -V)
+            V=$(echo "$TAGS" | grep '^25\.12\.' | tail -1)
+            [ -n "$V" ] || V=$(echo "$TAGS" | tail -1)
+            [ -n "$V" ] || V=$(grep -E "^ARG VERSION=" Dockerfile | cut -d"'" -f2 | cut -d'"' -f2)
+          fi
+          V=$(echo "$V" | sed 's/^v//')
+          echo "VERSION=$V" >> $GITHUB_ENV
+          echo "version=$V" >> $GITHUB_OUTPUT
+      - uses: docker/setup-buildx-action@v3
+      - run: |
+          set -eEo pipefail
+          rm -rf ./bin
+          mkdir -p ./bin
+          docker buildx build --platform linux/amd64 --build-arg VERSION="${VERSION}" --output type=local,dest=./bin --cache-from type=gha --cache-to type=gha,mode=max . 2>&1 | tee build.log
+          echo "${VERSION}" > ./bin/VERSION
+          cp build.log ./bin
+          find ./bin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: archer-c7-v2-${{ env.VERSION }}
+          path: ./bin/**/*
+          retention-days: 30
+      - if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ env.VERSION }}
+        run: |
+          set -eEo pipefail
+          TAG="v${VERSION}"
+          NOTES="Archer C7 v2 – OpenWrt ${VERSION} (ath79/generic). Source: https://git.openwrt.org/openwrt/openwrt.git@v${VERSION}. Install: sysupgrade -n /tmp/openwrt-ath79-generic-tplink_archer-c7-v2-squashfs-sysupgrade.bin"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG exists, uploading assets only (no delete)"
+          else
+            shopt -s globstar
+            gh release create "$TAG" --title "Archer C7 v2 – OpenWrt ${VERSION}" --notes "$NOTES" --target "${{ github.sha }}" ./bin/**/*
+          fi
+          gh release view "$TAG" --json assets --jq '.assets[].name'

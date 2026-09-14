@@ -1,10 +1,15 @@
 # Put your custom commands here that should be executed once
 # the system init finished. By default this file does nothing.
 
-# Enable ath9k dynack
-iw phy1 set distance auto
-
-# Scan with 5GHz radio to fix signal icons in luci
-timeout 1 iwinfo wlan0 scan &
+# ath9k dynack: prefer UCI 'option distance auto' on radios; best-effort
+# runtime fallback below (phy indices are unstable, so try all, ignore errors).
+# NOTE: removed boot-time 'iwinfo wlan0 scan &' — it races netifd,
+# disrupts DFS/channel selection and delays boot for a LuCI icon workaround.
+if command -v iw >/dev/null 2>&1; then
+	for _phy in phy0 phy1; do
+		iw "$_phy" set distance auto 2>/dev/null || true
+	done
+	unset _phy
+fi
 
 exit 0

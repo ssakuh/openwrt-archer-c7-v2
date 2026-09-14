@@ -1,50 +1,106 @@
 #!/bin/sh
+# wan-addr: WAN IP/MAC helpers (OpenWrt, DSA-compatible)
+# Hardened: quoting, MAC validation, pid validation, /dev/urandom, ip(8).
+set -eu
 
-wan=`uci get network.wan.ifname`
-pid=`cat "/var/run/udhcpc-${wan}.pid"`
-config=network.wan.macaddr
+config='network.wan.macaddr'
 
-randmac() {
-	dd bs=1 count=6 if=/dev/random 2>/dev/null | hexdump -v -e '/1 "%02X"' | sed 's/\(..\)/:\1/g; s/^.\(.\)[0-3]/\12/; s/^.\(.\)[4-7]/\16/; s/^.\(.\)[89AB]/\1A/; s/^.\(.\)[CDEF]/\1E/'
+is_valid_mac() {
+	case "${1:-}" in
+		[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]) return 0 ;;
+		*) return 1 ;;
+	esac
 }
 
-if [ "$1" = "ip" ]; then
-	if [ "$2" = "release" ]; then
-		kill -s SIGUSR2 "$pid"
-	elif [ "$2" = "renew" ]; then
-		kill -s SIGUSR1 "$pid"
-	elif [ "$2" = "toggle" ]; then
-		kill -s SIGUSR2 "$pid"
-		sleep 1
-		kill -s SIGUSR1 "$pid"
+# Prefer DSA 'device', fall back to legacy 'ifname'.
+wan_iface() {
+	if wan="$(uci -q get network.wan.device 2>/dev/null)" && [ -n "$wan" ]; then
+		printf '%s\n' "$wan"
+	elif wan="$(uci -q get network.wan.ifname 2>/dev/null)" && [ -n "$wan" ]; then
+		printf '%s\n' "$wan"
 	else
-		echo "Usage: wan-addr ip [release|renew|toggle]"
+		echo "wan-addr: error: cannot determine WAN interface (network.wan.device/ifname)" >&2
+		return 1
 	fi
-elif [ "$1" = "mac" ]; then
-	if [ "$2" = "get" ]; then
-		uci get "$config"
-	elif [ "$2" = "set" ]; then
-		if [ "$3" = "random" ]; then
-			mac=`randmac`
-		elif [ ${#3} -eq 17 ]; then
-			mac=$3
-		else
-			echo "wan-addr: mac: error: set valid MAC address or 'set random'"
-			exit 1
+}
+
+# Print pid of udhcpc for iface, validating the pidfile + process.
+udhcpc_pid() {
+	pidfile="/var/run/udhcpc-${1}.pid"
+	[ -r "$pidfile" ] || { echo "wan-addr: error: no pidfile $pidfile" >&2; return 1; }
+	pid="$(cat "$pidfile")"
+	case "$pid" in ''|*[!0-9]*) echo "wan-addr: error: bad pid in $pidfile" >&2; return 1 ;; esac
+	# Ensure pid is actually udhcpc (avoid killing arbitrary pid on stale file).
+	if [ -r "/proc/$pid/cmdline" ]; then
+		if ! tr '\0' ' ' < "/proc/$pid/cmdline" | grep -q 'udhcpc'; then
+			echo "wan-addr: error: pid $pid is not udhcpc" >&2; return 1
 		fi
-		uci set "$config"="$mac"
-		uci commit
 	else
-		echo "Usage: wan-addr mac [get|set (MAC|random)]"
+		# BusyBox fallback: kill -0 checks liveness only.
+		kill -0 "$pid" 2>/dev/null || { echo "wan-addr: error: pid $pid not running" >&2; return 1; }
 	fi
-elif [ "$1" = "status" ]; then
-	ifconfig "$wan"
-elif [ "$1" = "restart" ]; then
-	/etc/init.d/network restart
-elif [ "$1" = "randmac" ]; then
-	echo `randmac`
-else
+	printf '%s\n' "$pid"
+}
+
+randmac() {
+	# 6 random bytes, force unicast (bit0=0) + locally-administered (bit1=1) on first octet.
+	hex="$(dd bs=6 count=1 if=/dev/urandom 2>/dev/null | od -An -tx1 | tr -d ' \n' | tr 'a-f' 'A-F')"
+	[ "${#hex}" -eq 12 ] || return 1
+	first_hex="$(printf '%s' "$hex" | cut -c1-2)"
+	rest="$(printf '%s' "$hex" | cut -c3-12)"
+	first_dec="$(( 0x$first_hex & 0xFE | 0x02 ))"
+	# shellcheck disable=SC2059
+	first_out="$(printf '%02X' "$first_dec")"
+	printf '%s' "$first_out$rest" | sed 's/\(..\)/:\1/g; s/^://'
+	printf '\n'
+}
+
+usage() {
 	echo "Usage: wan-addr [status|restart|randmac]"
 	echo "       wan-addr ip [release|renew|toggle]"
 	echo "       wan-addr mac [get|set (MAC|random)]"
-fi
+}
+
+cmd="${1:-}"
+case "$cmd" in
+	ip)
+		sub="${2:-}"; wan="$(wan_iface)"; pid="$(udhcpc_pid "$wan")"
+		case "$sub" in
+			release) kill -s SIGUSR2 "$pid" ;;
+			renew) kill -s SIGUSR1 "$pid" ;;
+			toggle) kill -s SIGUSR2 "$pid"; sleep 1; kill -s SIGUSR1 "$pid" ;;
+			*) echo "Usage: wan-addr ip [release|renew|toggle]" >&2; exit 1 ;;
+		esac
+		;;
+	mac)
+		sub="${2:-}"
+		case "$sub" in
+			get) uci get "$config" ;;
+			set)
+				val="${3:-}"
+				if [ "$val" = "random" ]; then
+					mac="$(randmac)"
+				elif is_valid_mac "$val"; then
+					mac="$val"
+				else
+					echo "wan-addr: mac: error: set valid MAC address or 'set random'" >&2
+					exit 1
+				fi
+				uci set "$config=$mac"
+				uci commit network
+				;;
+			*) echo "Usage: wan-addr mac [get|set (MAC|random)]" >&2; exit 1 ;;
+		esac
+		;;
+	status)
+		wan="$(wan_iface)"
+		if command -v ip >/dev/null 2>&1; then
+			ip addr show dev "$wan"
+		else
+			ifconfig "$wan"
+		fi
+		;;
+	restart) /etc/init.d/network restart ;;
+	randmac) randmac ;;
+	*) usage >&2; exit 1 ;;
+esac
